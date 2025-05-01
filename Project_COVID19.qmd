@@ -1,0 +1,363 @@
+---
+title: "Project - COVID19"
+format:   
+  html: 
+    toc: true
+    toc-depth: 3
+    standalone: true
+    embed-resources: true
+    code-fold: true
+    number-sections: true
+editor_options: 
+ 
+---
+
+```{r}
+#| label: packages-data-functions
+#| message: false
+library(tidyverse)
+library(patchwork)            
+library(tidymodels)
+library(readxl)
+library(glue)
+library(corrplot)
+library(dplyr)
+library(knitr)
+library(tidyr)
+WDI <- read_csv("~/Documents/Constructor studies/DS concepts and DT tools/github_repositories/R/HW#3 COVID/Project_COVID19_aaldaniyaz/data/WDI.csv")
+WHO <- read_csv("~/Documents/Constructor studies/DS concepts and DT tools/github_repositories/R/HW#3 COVID/Project_COVID19_aaldaniyaz/data/WHO-COVID-19.csv")
+```
+
+
+# COVID-19 time evolution {#sec-1}
+
+
+## Covid Cases and Deaths in Germany's 1st wave {#sec-1.1}
+
+```{r}
+WHO |> filter(Country=="Germany", Date_reported<="2020-08-31")|>
+    pivot_longer(cols = c(New_cases, New_deaths), names_to = "Case_Death", values_to = "Count")|>
+    ggplot(aes(x = Date_reported, y = Count, color = Case_Death)) +
+  geom_line(aes(group=Case_Death))+
+      labs(x = "",
+       y = "Number of Cases",
+       title = "The number of new and death cases through time",
+       color="")+
+      scale_color_manual(values = c("New_cases" = "blue", "New_deaths" = "green"))+
+      theme_minimal()+
+  scale_y_continuous(breaks = seq(0, max(WHO$New_cases), by = 500))+
+  scale_x_date(date_labels = "%b %Y", date_breaks = "1 month")
+```
+
+
+## Cumulative cases in Germany, Italy, France, and UK {#sec-1.2}
+```{r}
+WHO|>
+  filter(Country %in% c("Germany", "Italy", "France", "The United Kingdom"), Date_reported<="2020-08-31")|>
+  group_by(Country)|>
+  arrange(Country, Date_reported)|>
+  mutate(C_cases=cumsum(New_cases), C_deaths=cumsum(New_deaths))|>
+  select(Country, Date_reported, C_cases, C_deaths)|>
+  pivot_longer(cols = c("C_cases", "C_deaths"), names_to = "Cases_deaths", values_to = "Count")|>
+  ggplot(aes(x=Date_reported, y=Count, color=Country))+
+  geom_line(aes(group=Country))+
+  labs(x = "",
+       y = "Number of cases",
+       title = "The number of cumulative cases and deaths through time")+
+  facet_wrap(~ Cases_deaths,scales = "free_y",labeller = labeller(Cases_deaths = c("C_cases" = "Cumulative Cases", "C_deaths" = "Cumulative Deaths")))+
+  scale_x_date(date_labels = "%b", date_breaks = "2 month")+
+  theme_minimal()
+```
+
+
+## Smoothing daily data {#sec-1.3}
+```{r}
+smooth3 <- function(x) {
+  (x + lag(x, n = 1, default = 0) + lag(x, n = 2, default = 0)) / 3
+}
+
+smooth7 <- function(x) {
+  (x + lag(x, n = 1, default = 0) + lag(x, n = 2, default = 0) + lag(x, n = 3, default = 0) +
+     lag(x, n = 4, default = 0) + lag(x, n = 5, default = 0) + lag(x, n = 6, default = 0)) / 7
+}
+
+smooth10 <- function(x) {
+  (x + lag(x, n = 1, default = 0) + lag(x, n = 2, default = 0) + lag(x, n = 3, default = 0) +
+     lag(x, n = 4, default = 0) + lag(x, n = 5, default = 0) + lag(x, n = 6, default = 0) +
+     lag(x, n = 7, default = 0) + lag(x, n = 8, default = 0) + lag(x, n = 9, default = 0)) / 10
+}
+
+who_smoothed <- WHO|>
+  group_by(Country)|>
+  mutate(
+    New_cases_smooth3 = smooth3(New_cases),
+    New_cases_smooth7 = smooth7(New_cases),
+    New_cases_smooth10 = smooth10(New_cases),
+    New_deaths_smooth3 = smooth3(New_deaths),
+    New_deaths_smooth7 = smooth7(New_deaths),
+    New_deaths_smooth10 = smooth10(New_deaths)
+  )
+
+who_smoothed|>
+  filter(Country == "Germany", Date_reported <= "2020-08-31") |>
+  pivot_longer(
+    cols = c("New_cases", "New_cases_smooth3", "New_cases_smooth7", "New_cases_smooth10"),
+    names_to = "Smooth_Variable",
+    values_to = "Count"
+  )|>
+  ggplot(aes(x = Date_reported, y = Count, color = Smooth_Variable)) +
+  geom_line(aes(group = Smooth_Variable)) +
+  labs(
+    x = "",
+    y = "Number of Cases",
+    title = "Comparison of Smoothed Cases and Daily New Cases in Germany until 2020-08-31",
+    color = ""
+  ) +
+  theme_minimal() +
+  facet_wrap(~ Smooth_Variable, scales = "free_y", labeller = labeller(Smooth_Variable = c("New_cases" = "New cases through time","New_cases_smooth3" = "Smoothed Cases for the last 3 days", "New_cases_smooth7" = "Smoothed Cases for the last 7 days", "New_cases_smooth10" = "Smoothed Cases for the last 10 days"))) +
+  theme(legend.position = "none")
+```
+
+
+## How do deaths follow cases? {#sec-1.4}
+```{r}
+shiftscale <- function(x, shift, scale) {
+  lagged_x <- lag(x, shift, default = 0)
+  scaled_x <- lagged_x * scale
+  return(scaled_x)}
+
+who_smoothed|>
+  mutate(shiftscale_cases = shiftscale(New_cases_smooth7, 5, 0.062))|>
+  filter(Country == "Germany", Date_reported <= "2020-08-31")|>
+  pivot_longer(cols = c("shiftscale_cases", "New_deaths_smooth7"),
+               names_to = "Variable",
+               values_to = "Count")|>
+  ggplot(aes(x = Date_reported, y = Count, color = Variable)) +
+  geom_line(aes(group = Variable)) +
+  labs(x = "",
+       y = "Number of Cases/Deaths",
+       title = "Comparison of Shiftscaled Cases and Deaths for Germany till 2020-08-31",
+       subtitle = "(the time series are smoothed over the last 7 days)",
+       color = "")+
+  scale_color_manual(values = c("New_deaths_smooth7" = "red","shiftscale_cases" = "blue"),
+                     labels = c("Deaths (Smoothed)", "Scaled and Shifted New Cases (Smoothed)"))+
+  scale_x_date(date_labels = "%b %Y", date_breaks = "2 month")+
+  theme_minimal()
+```
+
+
+## When does the wave break? {#sec-1.5}
+```{r}
+who_smoothed|>
+  mutate(shiftscale_cases = shiftscale(New_cases_smooth7, 6, 0.035))|>
+  filter(Country == "Germany", Date_reported >= "2020-07-01", Date_reported <= "2020-12-31")|>
+  pivot_longer(cols = c("shiftscale_cases", "New_deaths_smooth7"),
+               names_to = "Variable",
+               values_to = "Count")|>
+  ggplot(aes(x = Date_reported, y = Count, color = Variable)) +
+  geom_line(aes(group = Variable)) +
+  labs(x = "",
+       y = "Number of Cases/Deaths",
+       title = "Comparison of Shiftscaled Cases and Deaths for Germany",
+       subtitle = "from 2020-07-01 till 2020-12-31(the time series are smoothed over the last 7 days)",
+       color = "")+
+  scale_color_manual(values = c("New_deaths_smooth7" = "red","shiftscale_cases" = "blue"),
+                     labels = c("Deaths (Smoothed)", "Scaled and Shifted New Cases (Smoothed)"))+
+  scale_x_date(date_labels = "%b %Y", date_breaks = "2 month")+
+  theme_minimal()
+```
+
+
+
+# World Development Indicators {#sec-2}
+```{r}
+who_smoothed |>
+  mutate(Diff_cases_smooth7 = New_cases_smooth7 - lag(New_cases_smooth7, default = 0)) |>
+  filter(Country == "Germany", Date_reported >= "2020-03-01", Date_reported <= "2020-04-15") |>
+  pivot_longer(cols = c("New_cases_smooth7", "Diff_cases_smooth7"),
+               names_to = "Variable",
+               values_to = "Count") |>
+  ggplot(aes(x = Date_reported, y = Count, color = Variable)) +
+  geom_line(aes(group = Variable)) +
+  labs(x = "",
+       y = "Number of Cases",
+       title = "Smoothed New Cases and Derivative (Diff) in Germany",
+       subtitle = "from 1st of March to 15th of April (the time series are smoothed over the last 7 days)",
+       color = "Variable") +
+  theme_minimal() +
+  facet_grid(Variable ~ ., scales = "free_y", labeller = labeller(Variable = c("Diff_cases_smooth7" = "Derivative of new cases", "New_cases_smooth7" = "New cases (smoothed)"))) +
+  scale_x_date(date_breaks = "2 days", date_labels = "%d") +
+  theme(legend.position = "none")
+```
+
+
+```{r}
+## Correlation {#sec-2.1}
+wdi <- WDI |>
+  rename(
+    urban_pop = `Urban population (% of total population)`,
+    rural_pop = `Rural population (% of total population)`,
+    pop_lower_half_median = `Proportion of people living below 50 percent of median income (%)`,
+    pop = `Population, total`,
+    pop_older65 = `Population ages 65 and above (% of total population)`,
+    pop_density = `Population density (people per sq. km of land area)`,
+    physicians_per_1000 = `Physicians (per 1,000 people)`,
+    life_expectancy = `Life expectancy at birth, total (years)`,
+    gdp_per_capita = `GDP per capita, PPP (current international $)`
+  )
+```
+
+
+```{r}
+cor_matrix <- cor(wdi[, sapply(wdi, is.numeric)], use = "complete.obs")
+
+corrplot(cor_matrix, tl.cex = 0.7, tl.col = "black", tl.srt = 45)
+```
+
+# PCA {#sec-2.2}
+```{r}
+# Create wdi_noNA_small by removing all rows with any NA's
+wdi_noNA_small <- na.omit(wdi)
+
+# Find the two variables with the most NA's
+na_count <- colSums(is.na(wdi))
+top_na_vars <- names(sort(na_count, decreasing = TRUE)[1:2])
+
+# Remove the two variables with the most NA's
+wdi_noNA_large <- wdi %>%
+  select(-all_of(top_na_vars)) %>%
+  na.omit()
+
+```
+
+
+```{r}
+missing_countries_small <- anti_join(wdi, wdi_noNA_small, by = "iso3c") %>%
+  filter(pop > 1e6)
+
+kable(missing_countries_small[, c("iso3c", "country", "pop")], 
+      caption = "Countries Missing in wdi_noNA_small with Population > 1 Million")
+
+```
+
+
+```{r}
+# Create wdi_noNA_small by removing all rows with any NA's
+wdi_noNA_small <- na.omit(wdi)
+
+# Find the two variables with the most NA's
+na_count <- colSums(is.na(wdi))
+top_na_vars <- names(sort(na_count, decreasing = TRUE)[1:2])
+
+# Remove the two variables with the most NA's
+wdi_noNA_large <- wdi %>%
+  select(-all_of(top_na_vars)) %>%
+  na.omit()
+```
+
+
+```{r}
+missing_countries_small <- anti_join(wdi, wdi_noNA_small, by = "iso3c") %>%
+  filter(pop > 1e6)
+
+kable(missing_countries_small[, c("iso3c", "country", "pop")], 
+      caption = "Countries Missing in wdi_noNA_small with Population > 1 Million")
+
+```
+
+
+
+PCA SMALL
+```{r}
+# Scale the numeric variables for PCA
+wdi_small_pca <- prcomp(select(wdi_noNA_small, where(is.numeric)), scale. = TRUE)
+
+```
+
+
+```{r}
+explained_variance_small <- summary(wdi_small_pca)$importance[2,]
+
+# Plot explained variance
+qplot(x = 1:length(explained_variance_small), 
+      y = explained_variance_small, 
+      geom = "line") +
+  geom_point() +
+  labs(title = "Explained Variance (wdi_noNA_small)", 
+       x = "Principal Component", 
+       y = "Proportion of Variance Explained")
+
+```
+The explained variance plot shows:
+
+PC1 explains nearly 50% of the variance.
+PC2 explains about 15% of the variance.
+The remaining principal components explain progressively smaller amounts of variance.
+This suggests that the first two principal components capture a significant portion of the variability in the data.
+
+```{r}
+kable(wdi_small_pca$rotation[, 1:4], 
+      caption = "First Four Principal Components (wdi_noNA_small)")
+
+```
+
+
+```{r}
+pc_small_df <- data.frame(wdi_noNA_small, wdi_small_pca$x)
+
+ggplot(pc_small_df, aes(x = PC1, y = PC2, color = region, label = iso3c)) +
+  geom_text(size = 3) +
+  labs(title = "Countries in PC1 and PC2 (wdi_noNA_small)", 
+       x = "PC1", y = "PC2")
+
+```
+
+This analysis suggests that PC1 captures economic development, while PC2 might reflect demographic or regional-specific variations.
+
+
+#PCA Large
+```{r}
+# Scale the numeric variables for PCA
+wdi_large_pca <- prcomp(select(wdi_noNA_large, where(is.numeric)), scale. = TRUE)
+```
+
+
+```{r}
+explained_variance_large <- summary(wdi_large_pca)$importance[2,]
+
+# Plot explained variance
+qplot(x = 1:length(explained_variance_large), 
+      y = explained_variance_large, 
+      geom = "line") +
+  geom_point() +
+  labs(title = "Explained Variance (wdi_noNA_large)", 
+       x = "Principal Component", 
+       y = "Proportion of Variance Explained")
+
+```
+The explained variance plot shows:
+
+PC1 explains approximately 50% of the variance.
+PC2 explains around 18% of the variance.
+The remaining components explain smaller portions of the variance.
+
+```{r}
+kable(wdi_large_pca$rotation[, 1:4], 
+      caption = "First Four Principal Components (wdi_noNA_large)")
+
+```
+
+
+```{r}
+pc_large_df <- data.frame(wdi_noNA_large, wdi_large_pca$x)
+
+ggplot(pc_large_df, aes(x = PC1, y = PC2, color = region, label = iso3c)) +
+  geom_text(size = 3) +
+  labs(title = "Countries in PC1 and PC2 (wdi_noNA_large)", 
+       x = "PC1", y = "PC2")
+
+```
+PC1 seems to separate countries based on economic or development factors.
+PC2 might capture differences related to geographic or demographic factors
+
+```{r}
