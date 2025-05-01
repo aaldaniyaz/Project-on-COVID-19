@@ -1,9 +1,3 @@
-# PROJECT TITLE - PLEASE CHANGE
+# COVID-19 Pandemic Analysis (2019–2022) 
 
-*(For the final version remove this text and write a short descriptive text about the project. A full abstract/executive summary should be the beginning of your project report: qmd -> html.)*
-
-Next steps:
-
-- Edit the [Workplan](WORKPLAN.md)
-- Edit the [Timeline and Tasks](TIMELINE_TASKS.md)
-
+In this project, I explored and modeled the development of the COVID-19 pandemic from 2019 to 2022, focusing on key analytical techniques in time series analysis. The goal was to understand trends in the spread of the virus, smooth the time series data, and apply mathematical modeling to interpret the pandemic’s progression. In the project I examined COVID-19 case trends over time, applied methods like moving averages to reduce noise, investigated growth rates and inflection points, manually adjusted model parameters to match observed data and assessed different indicators for potential predictive models.
